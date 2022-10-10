@@ -3,6 +3,7 @@ package blockchain
 import (
 	"fmt"
 	"strings"
+	"sync"
 )
 
 const MINING_DIFFICULTY = 3
@@ -53,19 +54,45 @@ func (bc *Blockchain) CopyTransactionPool() []*Transaction {
 	return transactions
 }
 
-func (bc *Blockchain) ValidProof(nonce int, previousHash [32]byte, transactions []*Transaction, difficulty int) bool {
-	zeros := strings.Repeat("0", difficulty)
-	guessBlock := Block{0, nonce, previousHash, transactions}
-	guessHashStr := fmt.Sprintf("%x", guessBlock.Hash())
-	return guessHashStr[:difficulty] == zeros
+var wg sync.WaitGroup
+
+func (bc *Blockchain) ValidProof(nonce int, previousHash [32]byte, transactions []*Transaction, difficulty int, ch chan int) {
+	defer wg.Done()
+	if len(ch) == 0 {
+		zeros := strings.Repeat("0", difficulty)
+		guessBlock := Block{0, nonce, previousHash, transactions}
+		guessHashStr := fmt.Sprintf("%x", guessBlock.Hash())
+		if guessHashStr[:difficulty] == zeros {
+			fmt.Println(guessHashStr)
+			ch <- nonce
+		}
+	}
+	//zeros := strings.Repeat("0", difficulty)
+	//guessBlock := Block{0, nonce, previousHash, transactions}
+	//guessHashStr := fmt.Sprintf("%x", guessBlock.Hash())
+	//return guessHashStr[:difficulty] == zeros
 }
 
 func (bc *Blockchain) ProofOfWork() int {
 	transactions := bc.CopyTransactionPool()
 	previousHash := bc.LastBlock().Hash()
 	nonce := 0
-	for !bc.ValidProof(nonce, previousHash, transactions, MINING_DIFFICULTY) {
-		nonce++
+	ch := make(chan int, 1)
+Loop:
+	for {
+		select {
+		case nonce = <-ch:
+			wg.Wait()
+			close(ch)
+			break Loop
+		default:
+			wg.Add(1)
+			go bc.ValidProof(nonce, previousHash, transactions, MINING_DIFFICULTY, ch)
+			nonce++
+		}
 	}
+	//for !bc.ValidProof(nonce, previousHash, transactions, MINING_DIFFICULTY) {
+	//	nonce++
+	//}
 	return nonce
 }
